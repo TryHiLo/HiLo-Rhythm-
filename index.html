@@ -744,7 +744,7 @@ svg{ display:block; }
           <div style="position:relative;z-index:2;">
             <div class="topbar">
               <span class="link-back" style="padding-left:0;" onclick="exitReflection()">Cancel</span>
-              <span style="font-size:12px;font-weight:700;letter-spacing:.1em;opacity:.6;color:#fff;">TODAY</span>
+              <span class="reflect-day-label" style="font-size:12px;font-weight:700;letter-spacing:.1em;opacity:.6;color:#fff;">TODAY</span>
               <span style="width:52px;"></span>
             </div>
             <div class="step-track">
@@ -785,7 +785,7 @@ svg{ display:block; }
           <div style="position:relative;z-index:2;">
             <div class="topbar">
               <span class="link-back" style="padding-left:0;" onclick="exitReflection()">Cancel</span>
-              <span style="font-size:12px;font-weight:700;letter-spacing:.1em;opacity:.6;color:#fff;">TODAY</span>
+              <span class="reflect-day-label" style="font-size:12px;font-weight:700;letter-spacing:.1em;opacity:.6;color:#fff;">TODAY</span>
               <span style="width:52px;"></span>
             </div>
             <div class="step-track">
@@ -826,7 +826,7 @@ svg{ display:block; }
           <div style="position:relative;z-index:2;">
             <div class="topbar">
               <span class="link-back" style="padding-left:0;" onclick="exitReflection()">Cancel</span>
-              <span style="font-size:12px;font-weight:700;letter-spacing:.1em;opacity:.6;color:#fff;">TODAY</span>
+              <span class="reflect-day-label" style="font-size:12px;font-weight:700;letter-spacing:.1em;opacity:.6;color:#fff;">TODAY</span>
               <span style="width:52px;"></span>
             </div>
             <div class="step-track">
@@ -1583,6 +1583,7 @@ const ui = {
   pendingReviewDemo: false,
   activeCircleId: null,   // which Circle the detail/invite screens are showing
   pendingInvite: null,    // circle name, when arriving via an invite link
+  reflectingDate: null,   // which day the reflection flow is writing to
 };
 
 /* ---------------- Screen router ---------------- */
@@ -1753,17 +1754,35 @@ function renderSeasonTimeline(){
 
 /* ---------------- Reflection flow ---------------- */
 function startReflection(){
-  const today = Store.getEntryByDate(Store.todayStr());
-  if (today){
+  reflectOn(Store.todayStr());
+}
+
+/* Opens the reflection flow for a given date. Normally today; can also be a
+   missed day still inside the 48-hour grace window, which is the whole point
+   of having a grace window at all. */
+function reflectOn(date){
+  if (!Store.isEntryEditable(date)){
+    toast('That day is read only now');
+    return;
+  }
+  ui.reflectingDate = date;
+  const existing = Store.getEntryByDate(date);
+  if (existing){
     // Stay here rather than bouncing to Remember -- Reflect is the "present"
     // tab. Today's entry is still editable; past days live in Remember.
-    document.getElementById('fieldHi').value = today.hi || '';
-    document.getElementById('fieldLo').value = today.lo || '';
-    document.getElementById('fieldProject').value = today.project || '';
-    toast("Today's reflection is already saved — edit it if you'd like");
+    document.getElementById('fieldHi').value = existing.hi || '';
+    document.getElementById('fieldLo').value = existing.lo || '';
+    document.getElementById('fieldProject').value = existing.project || '';
+    if (date === Store.todayStr()) toast("Today's reflection is already saved — edit it if you'd like");
   } else {
     ['fieldHi','fieldLo','fieldProject'].forEach(id => { const f = document.getElementById(id); if (f) f.value=''; });
   }
+
+  const isToday = date === Store.todayStr();
+  document.querySelectorAll('.reflect-day-label').forEach(el => {
+    el.textContent = isToday ? 'TODAY' : formatDisplayDate(date).toUpperCase();
+  });
+
   go('reflect-1');
   setTimeout(() => document.getElementById('fieldHi')?.focus(), 700);
 }
@@ -1782,7 +1801,8 @@ function saveReflection(){
     return;
   }
 
-  Store.saveEntry(Store.todayStr(), { hi, lo, project });
+  const date = ui.reflectingDate || Store.todayStr();
+  Store.saveEntry(date, { hi, lo, project });
   go('completion');
 }
 
@@ -1795,8 +1815,8 @@ function renderCompletionShare(){
     slot.innerHTML = '';
     return;
   }
-  const today = Store.todayStr();
-  const entry = Store.getEntryByDate(today);
+  const date = ui.reflectingDate || Store.todayStr();
+  const entry = Store.getEntryByDate(date);
   const sharedTo = entry?.sharedTo || null;
 
   slot.innerHTML = active.map(c => {
@@ -1811,11 +1831,11 @@ function renderCompletionShare(){
 }
 
 function toggleShareToday(circleId){
-  const today = Store.todayStr();
-  const entry = Store.getEntryByDate(today);
+  const date = ui.reflectingDate || Store.todayStr();
+  const entry = Store.getEntryByDate(date);
   if (!entry) return;
   const nowShared = entry.sharedTo === circleId;
-  Store.setEntryShared(today, nowShared ? null : circleId);
+  Store.setEntryShared(date, nowShared ? null : circleId);
   const c = Store.getCircleById(circleId);
   toast(nowShared ? 'Kept private' : `Shared with ${c ? c.name : 'your Circle'}`);
   renderCompletionShare();
@@ -1875,8 +1895,8 @@ function renderJournal(){
     } else if (date <= today){
       html += `
         <div class="card center mb-16" style="border:1.5px dashed var(--violet-200);background:transparent;box-shadow:none;">
-          <p class="muted serif" style="font-style:italic;font-size:13.5px;">${label} — no entry</p>
-          ${date === today ? `<button class="btn btn-outline btn-sm mt-14" style="width:auto;padding:9px 18px;" onclick="startReflection()">Fill it in</button>` : ''}
+          <p class="muted serif" style="font-style:italic;font-size:13.5px;">${emptyDayLabel(label, i)}</p>
+          ${i <= 1 ? `<button class="btn btn-outline btn-sm mt-14" style="width:auto;padding:9px 18px;" onclick="reflectOn('${date}')">${i === 0 ? 'Reflect on today' : 'Add yesterday'}</button>` : ''}
         </div>`;
     }
   }
@@ -1904,6 +1924,14 @@ function renderJournal(){
   list.innerHTML = html;
 }
 
+/* Empty days shouldn't read like a scolding. Recent ones get an invitation;
+   older ones are just quietly noted and left alone. */
+function emptyDayLabel(label, daysAgo){
+  if (daysAgo === 0) return label;
+  if (daysAgo === 1) return `${label} — still open`;
+  return `${label} — no reflection`;
+}
+
 /* A quiet note on entries you chose to share, so you always know what the
    Circle can see -- not knowing is its own low-grade anxiety. */
 function sharedMarkerHTML(entry){
@@ -1924,7 +1952,7 @@ function editControlHTML(date){
               <button class="btn btn-outline btn-sm" style="width:auto;padding:9px 16px;font-size:12.5px;" onclick="openEntryEditor('${date}')">Edit</button>
             </div>`;
   }
-  return `<div class="muted mt-16" style="font-size:11.5px;text-align:right;font-style:italic;">Locked — the 48-hour window has closed.</div>`;
+  return `<div class="muted mt-16" style="font-size:11.5px;text-align:right;">Read only</div>`;
 }
 
 function openEntryEditor(date){
